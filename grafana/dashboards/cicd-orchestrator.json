@@ -1,0 +1,80 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Pipeline Executions (Total)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(cicd_pipelines_total)", "legendFormat": "Total" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } }
+    },
+    {
+      "title": "Pipeline Success Rate",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "sum(cicd_pipelines_total{status=\"SUCCESS\"}) / sum(cicd_pipelines_total) * 100", "legendFormat": "Success %" }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "unit": "percent", "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 70 }, { "color": "green", "value": 90 }] } } }
+    },
+    {
+      "title": "Avg Pipeline Duration",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "avg(cicd_pipeline_duration_seconds_sum / cicd_pipeline_duration_seconds_count)", "legendFormat": "Avg Duration" }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Active Pipelines",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "cicd_active_pipelines", "legendFormat": "Active" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 10 }] } } }
+    },
+    {
+      "title": "Agent Node Execution Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [{ "expr": "rate(cicd_agent_node_duration_seconds_sum[5m]) / rate(cicd_agent_node_duration_seconds_count[5m])", "legendFormat": "{{node}}" }]
+    },
+    {
+      "title": "Pipeline Events Throughput",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "rate(cicd_kafka_messages_consumed_total[5m])", "legendFormat": "Consumed" },
+        { "expr": "rate(cicd_kafka_messages_produced_total[5m])", "legendFormat": "Produced" }
+      ]
+    },
+    {
+      "title": "Builds by Status",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "targets": [{ "expr": "sum by (status) (cicd_builds_total)", "legendFormat": "{{status}}" }]
+    },
+    {
+      "title": "Tests Executed",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "targets": [
+        { "expr": "rate(cicd_tests_total{result=\"passed\"}[5m])", "legendFormat": "Passed" },
+        { "expr": "rate(cicd_tests_total{result=\"failed\"}[5m])", "legendFormat": "Failed" }
+      ]
+    },
+    {
+      "title": "Deployment Gate Decisions",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "targets": [{ "expr": "sum by (decision) (cicd_deployment_gates_total)", "legendFormat": "{{decision}}" }]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["cicd", "orchestrator", "agents"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "Agentic CI/CD Orchestrator",
+  "uid": "cicd-orchestrator-main"
+}

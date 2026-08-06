@@ -1,0 +1,60 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: agentic-cicd-orchestrator
+
+  kafka:
+    bootstrap-servers: localhost:19092
+    consumer:
+      group-id: cicd-orchestrator
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        max.poll.interval.ms: 300000
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+# ─── LLM Configuration ───
+agent:
+  llm:
+    provider: openai
+    model: gpt-4o
+    api-key: ${OPENAI_API_KEY:your-key-here}
+    temperature: 0.2
+    max-tokens: 4096
+
+  # Pipeline defaults
+  pipeline:
+    max-retries: 3
+    timeout-seconds: 600
+    parallel-builds: 4
+
+  # GitHub integration
+  github:
+    token: ${GITHUB_TOKEN:}
+    webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
+
+# ─── Observability ───
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    export:
+      prometheus:
+        enabled: true
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.cicd.orchestrator: DEBUG
+    org.apache.kafka: WARN

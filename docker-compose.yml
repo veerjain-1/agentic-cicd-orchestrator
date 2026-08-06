@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # ─── Kafka (Redpanda) ───
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.1
+    container_name: cicd-kafka
+    command:
+      - redpanda start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --default-log-level=warn
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # ─── Kafka Console UI ───
+  console:
+    image: docker.redpanda.com/redpandadata/console:v2.4.5
+    container_name: cicd-kafka-console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "8888:8080"
+    environment:
+      - KAFKA_BROKERS=redpanda:9092
+
+  # ─── Topic Initialization ───
+  topic-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.1
+    container_name: cicd-topic-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command: |
+      -c "
+      rpk topic create commit-events --brokers redpanda:9092 -p 6 -r 1 &&
+      rpk topic create pipeline-events --brokers redpanda:9092 -p 6 -r 1 &&
+      rpk topic create pipeline-results --brokers redpanda:9092 -p 3 -r 1 &&
+      rpk topic create feedback-loop --brokers redpanda:9092 -p 3 -r 1 &&
+      rpk topic create agent-decisions --brokers redpanda:9092 -p 3 -r 1 &&
+      echo '✅ All Kafka topics created!'
+      "
+
+  # ─── Prometheus ───
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: cicd-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+
+  # ─── Grafana ───
+  grafana:
+    image: grafana/grafana:10.4.1
+    container_name: cicd-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  redpanda-data:
+  prometheus-data:
+  grafana-data:

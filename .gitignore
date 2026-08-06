@@ -1,0 +1,15 @@
+.gradle/
+build/
+bin/
+*.class
+*.jar
+*.log
+.env
+.env.local
+.DS_Store
+out/
+*.iml
+.idea/
+node_modules/
+grafana/data/
+prometheus/data/
