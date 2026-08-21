@@ -68,4 +68,16 @@ public class PipelineExecutionService {
     public PipelineState getPipelineStatus(String pipelineId) {
         return activePipelines.get(pipelineId);
     }
+
+    public boolean cancelPipeline(String pipelineId) {
+        PipelineState state = activePipelines.get(pipelineId);
+        if (state != null) {
+            state.status(PipelineState.PipelineStatus.FAILED);
+            state.addError("Pipeline cancelled by user");
+            state.setCompletedAt(java.time.Instant.now());
+            kafkaTemplate.send("pipeline-results", pipelineId, "CANCELLED");
+            return true;
+        }
+        return false;
+    }
 }

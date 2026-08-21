@@ -46,4 +46,17 @@ public class PipelineController {
         }
         return ResponseEntity.ok(state);
     }
+
+    @DeleteMapping("/{pipelineId}")
+    public ResponseEntity<Map<String, String>> cancelPipeline(@PathVariable String pipelineId) {
+        boolean cancelled = executionService.cancelPipeline(pipelineId);
+        if (!cancelled) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(Map.of(
+                "status", "CANCELLED",
+                "pipelineId", pipelineId,
+                "message", "Pipeline cancelled successfully."
+        ));
+    }
 }
