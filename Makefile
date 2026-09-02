@@ -14,3 +14,7 @@ test:
 
 run:
 	./gradlew bootRun
+
+test:
+	@echo "🧪 Running unit tests..."
+	./gradlew test
