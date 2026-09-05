@@ -1,14 +1,16 @@
 package com.cicd.orchestrator.service;
 
+import com.cicd.orchestrator.engine.DagExecutor;
+import com.cicd.orchestrator.engine.TaskNode;
 import com.cicd.orchestrator.model.PipelineState;
-import org.bsc.langgraph4j.StateGraph;
-import org.bsc.langgraph4j.CompiledGraph;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -16,14 +18,16 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PipelineExecutionService {
     private static final Logger log = LoggerFactory.getLogger(PipelineExecutionService.class);
 
-    private final StateGraph<PipelineState> pipelineGraph;
+    private final DagExecutor dagExecutor;
+    private final List<TaskNode> pipelineDag;
     private final KafkaTemplate<String, String> kafkaTemplate;
     
-    // In-memory store for running pipelines (use Redis/DB in production)
+    // In-memory store for running pipelines (use Redis in production)
     private final Map<String, PipelineState> activePipelines = new ConcurrentHashMap<>();
 
-    public PipelineExecutionService(StateGraph<PipelineState> pipelineGraph, KafkaTemplate<String, String> kafkaTemplate) {
-        this.pipelineGraph = pipelineGraph;
+    public PipelineExecutionService(DagExecutor dagExecutor, List<TaskNode> pipelineDag, KafkaTemplate<String, String> kafkaTemplate) {
+        this.dagExecutor = dagExecutor;
+        this.pipelineDag = pipelineDag;
         this.kafkaTemplate = kafkaTemplate;
     }
 
@@ -31,31 +35,32 @@ public class PipelineExecutionService {
     public void executePipeline(PipelineState initialState) {
         String id = initialState.getPipelineId();
         activePipelines.put(id, initialState);
-        log.info("🚀 Starting pipeline execution for ID: {}", id);
+        log.info("🚀 Starting Distributed DAG pipeline execution for ID: {}", id);
 
         try {
-            CompiledGraph<PipelineState> compiled = pipelineGraph.compile();
+            Map<String, Object> executionContext = new HashMap<>();
+            executionContext.put("repo", initialState.getRepoName());
+            executionContext.put("commit", initialState.getCommitSha());
             
-            // Execute the graph
-            var result = compiled.invoke(initialState);
+            // Execute the graph concurrently using Virtual Threads
+            boolean success = dagExecutor.execute(pipelineDag, executionContext);
             
-            // The result contains the final state
-            if (result.isPresent()) {
-                PipelineState finalState = result.get();
-                finalState.status(PipelineState.PipelineStatus.COMPLETED);
-                finalState.setCompletedAt(java.time.Instant.now());
-                activePipelines.put(id, finalState);
+            if (success) {
+                initialState.status(PipelineState.PipelineStatus.COMPLETED);
+                initialState.setCompletedAt(java.time.Instant.now());
+                activePipelines.put(id, initialState);
                 log.info("✅ Pipeline completed successfully: {}", id);
-                
-                // Publish completion event
-                // In a real app, serialize finalState to JSON
                 kafkaTemplate.send("pipeline-results", id, "COMPLETED");
             } else {
-                log.warn("⚠️ Pipeline finished without a final state: {}", id);
+                log.error("❌ Pipeline execution failed for ID: {}", id);
+                initialState.status(PipelineState.PipelineStatus.FAILED);
+                initialState.setCompletedAt(java.time.Instant.now());
+                activePipelines.put(id, initialState);
+                kafkaTemplate.send("pipeline-results", id, "FAILED");
             }
             
         } catch (Exception e) {
-            log.error("❌ Pipeline execution failed for ID: {}", id, e);
+            log.error("❌ Pipeline execution crashed for ID: {}", id, e);
             initialState.status(PipelineState.PipelineStatus.FAILED);
             initialState.addError(e.getMessage());
             initialState.setCompletedAt(java.time.Instant.now());
