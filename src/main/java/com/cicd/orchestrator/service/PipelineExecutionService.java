@@ -39,7 +39,7 @@ public class PipelineExecutionService {
 
         try {
             Map<String, Object> executionContext = new HashMap<>();
-            executionContext.put("repo", initialState.getRepoName());
+            executionContext.put("repo", initialState.getRepo());
             executionContext.put("commit", initialState.getCommitSha());
             
             // Execute the graph concurrently using Virtual Threads
