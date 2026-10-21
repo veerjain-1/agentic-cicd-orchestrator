@@ -2,9 +2,11 @@ package com.cicd.orchestrator.controller;
 
 import com.cicd.orchestrator.model.PipelineState;
 import com.cicd.orchestrator.service.PipelineExecutionService;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -38,6 +40,11 @@ public class PipelineController {
         ));
     }
 
+    @GetMapping
+    public ResponseEntity<List<PipelineState>> getAllPipelines() {
+        return ResponseEntity.ok(executionService.getAllPipelines());
+    }
+
     @GetMapping("/{pipelineId}")
     public ResponseEntity<PipelineState> getStatus(@PathVariable String pipelineId) {
         PipelineState state = executionService.getPipelineStatus(pipelineId);
@@ -45,6 +52,28 @@ public class PipelineController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(state);
+    }
+
+    @GetMapping("/{pipelineId}/report")
+    public ResponseEntity<Map<String, Object>> getReport(@PathVariable String pipelineId) {
+        Map<String, Object> report = executionService.getPipelineReport(pipelineId);
+        if (report == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(report);
+    }
+
+    @GetMapping(value = "/{pipelineId}/pr-comment", produces = MediaType.TEXT_PLAIN_VALUE)
+    public ResponseEntity<String> getPrComment(@PathVariable String pipelineId) {
+        PipelineState state = executionService.getPipelineStatus(pipelineId);
+        if (state == null) {
+            return ResponseEntity.notFound().build();
+        }
+        String prComment = state.getPrCommentBody();
+        if (prComment == null || prComment.isEmpty()) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(prComment);
     }
 
     @DeleteMapping("/{pipelineId}")

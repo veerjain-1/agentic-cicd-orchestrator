@@ -70,4 +70,58 @@ public class PipelineControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
     }
+
+    @Test
+    public void testGetAllPipelines() throws Exception {
+        PipelineState state1 = new PipelineState("p1", "repo1", "main", "sha1");
+        PipelineState state2 = new PipelineState("p2", "repo2", "dev", "sha2");
+
+        when(executionService.getAllPipelines()).thenReturn(java.util.List.of(state1, state2));
+
+        mockMvc.perform(get("/api/v1/pipelines"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].pipelineId").value("p1"))
+                .andExpect(jsonPath("$[1].pipelineId").value("p2"));
+    }
+
+    @Test
+    public void testGetReportFound() throws Exception {
+        java.util.Map<String, Object> report = java.util.Map.of(
+                "pipelineId", "p100",
+                "repo", "veerjain-1/agentguard",
+                "status", "COMPLETED",
+                "hasPrComment", true
+        );
+
+        when(executionService.getPipelineReport("p100")).thenReturn(report);
+
+        mockMvc.perform(get("/api/v1/pipelines/p100/report"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pipelineId").value("p100"))
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.hasPrComment").value(true));
+    }
+
+    @Test
+    public void testGetPrCommentFound() throws Exception {
+        PipelineState state = new PipelineState("p200", "repo", "main", "sha");
+        state.setPrCommentBody("### 🛡️ AI Security & Quality Audit Report\nPassed.");
+
+        when(executionService.getPipelineStatus("p200")).thenReturn(state);
+
+        mockMvc.perform(get("/api/v1/pipelines/p200/pr-comment"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("AI Security & Quality Audit Report")));
+    }
+
+    @Test
+    public void testGetPrCommentNoContentWhenNull() throws Exception {
+        PipelineState state = new PipelineState("p300", "repo", "main", "sha");
+
+        when(executionService.getPipelineStatus("p300")).thenReturn(state);
+
+        mockMvc.perform(get("/api/v1/pipelines/p300/pr-comment"))
+                .andExpect(status().isNoContent());
+    }
 }

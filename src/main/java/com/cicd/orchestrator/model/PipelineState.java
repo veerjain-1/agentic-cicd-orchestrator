@@ -143,6 +143,7 @@ public class PipelineState {
     public List<String> getErrors() { return errors; }
     public List<String> getWarnings() { return warnings; }
     public Instant getCreatedAt() { return createdAt; }
+    public Instant getStartedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getCompletedAt() { return completedAt; }
     public Map<String, Long> getNodeTimings() { return nodeTimings; }

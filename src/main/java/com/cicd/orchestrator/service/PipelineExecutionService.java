@@ -9,6 +9,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +23,7 @@ public class PipelineExecutionService {
     private final List<TaskNode> pipelineDag;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final PipelineMetricsService metricsService;
+    private final PipelineFeedbackProducer feedbackProducer;
     
     // In-memory store for running pipelines (use Redis in production)
     private final Map<String, PipelineState> activePipelines = new ConcurrentHashMap<>();
@@ -30,12 +32,14 @@ public class PipelineExecutionService {
             DagExecutor dagExecutor,
             List<TaskNode> pipelineDag,
             KafkaTemplate<String, String> kafkaTemplate,
-            PipelineMetricsService metricsService
+            PipelineMetricsService metricsService,
+            PipelineFeedbackProducer feedbackProducer
     ) {
         this.dagExecutor = dagExecutor;
         this.pipelineDag = pipelineDag;
         this.kafkaTemplate = kafkaTemplate;
         this.metricsService = metricsService;
+        this.feedbackProducer = feedbackProducer;
     }
 
     @Async
@@ -43,6 +47,8 @@ public class PipelineExecutionService {
         String id = initialState.getPipelineId();
         activePipelines.put(id, initialState);
         log.info("🚀 Starting Distributed DAG pipeline execution for ID: {}", id);
+
+        feedbackProducer.sendPipelineStarted(id, initialState.getRepo(), initialState.getCommitSha(), initialState.getBranch());
 
         long startNanos = System.currentTimeMillis();
 
@@ -62,6 +68,9 @@ public class PipelineExecutionService {
                 initialState.setCommitAnalysis(commitAnalysis);
                 String risk = (String) commitAnalysis.getOrDefault("riskScore", "UNKNOWN");
                 metricsService.recordAgentAnalysis(initialState.getRepo(), risk, durationMs);
+
+                int findingsCount = commitAnalysis.containsKey("findings") ? ((List<?>) commitAnalysis.get("findings")).size() : 0;
+                feedbackProducer.sendSecurityAuditEvent(id, initialState.getRepo(), risk, findingsCount);
             }
 
             @SuppressWarnings("unchecked")
@@ -69,7 +78,9 @@ public class PipelineExecutionService {
             if (dependencyReport != null) {
                 initialState.setDependencyReport(dependencyReport);
                 int vulns = (Integer) dependencyReport.getOrDefault("vulnerabilitiesFound", 0);
+                boolean valid = (Boolean) dependencyReport.getOrDefault("valid", true);
                 metricsService.recordVulnerabilities(initialState.getRepo(), vulns);
+                feedbackProducer.sendDependencyValidationEvent(id, initialState.getRepo(), valid, vulns);
             }
 
             String prComment = (String) executionContext.get("prCommentBody");
@@ -83,6 +94,8 @@ public class PipelineExecutionService {
                     success,
                     durationMs
             );
+
+            feedbackProducer.sendPipelineFinished(id, initialState.getRepo(), success, durationMs);
             
             if (success) {
                 initialState.status(PipelineState.PipelineStatus.COMPLETED);
@@ -107,6 +120,8 @@ public class PipelineExecutionService {
                     durationMs
             );
 
+            feedbackProducer.sendPipelineFinished(id, initialState.getRepo(), false, durationMs);
+
             log.error("❌ Pipeline execution crashed for ID: {}", id, e);
             initialState.status(PipelineState.PipelineStatus.FAILED);
             initialState.addError(e.getMessage());
@@ -122,6 +137,31 @@ public class PipelineExecutionService {
         return activePipelines.get(pipelineId);
     }
 
+    public List<PipelineState> getAllPipelines() {
+        return new ArrayList<>(activePipelines.values());
+    }
+
+    public Map<String, Object> getPipelineReport(String pipelineId) {
+        PipelineState state = activePipelines.get(pipelineId);
+        if (state == null) {
+            return null;
+        }
+        Map<String, Object> report = new HashMap<>();
+        report.put("pipelineId", state.getPipelineId());
+        report.put("repo", state.getRepo());
+        report.put("branch", state.getBranch());
+        report.put("commitSha", state.getCommitSha());
+        report.put("status", state.getStatus());
+        report.put("environment", state.getEnvironment());
+        report.put("startedAt", state.getStartedAt());
+        report.put("completedAt", state.getCompletedAt());
+        report.put("commitAnalysis", state.getCommitAnalysis());
+        report.put("dependencyReport", state.getDependencyReport());
+        report.put("errors", state.getErrors());
+        report.put("hasPrComment", state.getPrCommentBody() != null && !state.getPrCommentBody().isEmpty());
+        return report;
+    }
+
     public boolean cancelPipeline(String pipelineId) {
         PipelineState state = activePipelines.get(pipelineId);
         if (state != null) {
@@ -129,6 +169,7 @@ public class PipelineExecutionService {
             state.addError("Pipeline cancelled by user");
             state.setCompletedAt(java.time.Instant.now());
             kafkaTemplate.send("pipeline-results", pipelineId, "CANCELLED");
+            feedbackProducer.sendPipelineFinished(pipelineId, state.getRepo(), false, 0);
             return true;
         }
         return false;
