@@ -3,6 +3,7 @@ build/
 bin/
 *.class
 *.jar
+!gradle/wrapper/gradle-wrapper.jar
 *.log
 .env
 .env.local

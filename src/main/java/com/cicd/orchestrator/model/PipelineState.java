@@ -124,6 +124,7 @@ public class PipelineState {
     // Getters
     public String getPipelineId() { return pipelineId; }
     public String getRepo() { return repo; }
+    public String getRepoName() { return repo; }
     public String getBranch() { return branch; }
     public String getCommitSha() { return commitSha; }
     public String getCommitMessage() { return commitMessage; }
