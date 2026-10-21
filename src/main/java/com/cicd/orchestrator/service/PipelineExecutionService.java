@@ -21,14 +21,21 @@ public class PipelineExecutionService {
     private final DagExecutor dagExecutor;
     private final List<TaskNode> pipelineDag;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final PipelineMetricsService metricsService;
     
     // In-memory store for running pipelines (use Redis in production)
     private final Map<String, PipelineState> activePipelines = new ConcurrentHashMap<>();
 
-    public PipelineExecutionService(DagExecutor dagExecutor, List<TaskNode> pipelineDag, KafkaTemplate<String, String> kafkaTemplate) {
+    public PipelineExecutionService(
+            DagExecutor dagExecutor,
+            List<TaskNode> pipelineDag,
+            KafkaTemplate<String, String> kafkaTemplate,
+            PipelineMetricsService metricsService
+    ) {
         this.dagExecutor = dagExecutor;
         this.pipelineDag = pipelineDag;
         this.kafkaTemplate = kafkaTemplate;
+        this.metricsService = metricsService;
     }
 
     @Async
@@ -37,6 +44,8 @@ public class PipelineExecutionService {
         activePipelines.put(id, initialState);
         log.info("🚀 Starting Distributed DAG pipeline execution for ID: {}", id);
 
+        long startNanos = System.currentTimeMillis();
+
         try {
             Map<String, Object> executionContext = new HashMap<>();
             executionContext.put("repo", initialState.getRepo());
@@ -44,6 +53,36 @@ public class PipelineExecutionService {
             
             // Execute the graph concurrently using Virtual Threads
             boolean success = dagExecutor.execute(pipelineDag, executionContext);
+            long durationMs = System.currentTimeMillis() - startNanos;
+
+            // Ingest results produced by the tasks into the persistent pipeline state
+            @SuppressWarnings("unchecked")
+            Map<String, Object> commitAnalysis = (Map<String, Object>) executionContext.get("commitAnalysis");
+            if (commitAnalysis != null) {
+                initialState.setCommitAnalysis(commitAnalysis);
+                String risk = (String) commitAnalysis.getOrDefault("riskScore", "UNKNOWN");
+                metricsService.recordAgentAnalysis(initialState.getRepo(), risk, durationMs);
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> dependencyReport = (Map<String, Object>) executionContext.get("dependencyReport");
+            if (dependencyReport != null) {
+                initialState.setDependencyReport(dependencyReport);
+                int vulns = (Integer) dependencyReport.getOrDefault("vulnerabilitiesFound", 0);
+                metricsService.recordVulnerabilities(initialState.getRepo(), vulns);
+            }
+
+            String prComment = (String) executionContext.get("prCommentBody");
+            if (prComment != null) {
+                initialState.setPrCommentBody(prComment);
+            }
+
+            metricsService.recordPipelineCompleted(
+                    initialState.getRepo(),
+                    initialState.getEnvironment(),
+                    success,
+                    durationMs
+            );
             
             if (success) {
                 initialState.status(PipelineState.PipelineStatus.COMPLETED);
@@ -60,6 +99,14 @@ public class PipelineExecutionService {
             }
             
         } catch (Exception e) {
+            long durationMs = System.currentTimeMillis() - startNanos;
+            metricsService.recordPipelineCompleted(
+                    initialState.getRepo(),
+                    initialState.getEnvironment(),
+                    false,
+                    durationMs
+            );
+
             log.error("❌ Pipeline execution crashed for ID: {}", id, e);
             initialState.status(PipelineState.PipelineStatus.FAILED);
             initialState.addError(e.getMessage());
@@ -69,6 +116,7 @@ public class PipelineExecutionService {
             kafkaTemplate.send("pipeline-results", id, "FAILED");
         }
     }
+
 
     public PipelineState getPipelineStatus(String pipelineId) {
         return activePipelines.get(pipelineId);

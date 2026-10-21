@@ -94,10 +94,18 @@ open http://localhost:3001  # admin/admin
 ### Key Metrics
 - `cicd_pipeline_duration_seconds` — End-to-end pipeline execution time
 - `cicd_agent_node_duration_seconds` — Per-node execution time
+- `cicd_agent_code_analysis_duration_seconds` — LLM code analysis duration
+- `cicd_agent_reviews_total` — Total AI reviews by risk assessment
+- `cicd_dependency_vulnerabilities_total` — Real-time vulnerability detection counts
 - `cicd_builds_total` — Total builds by status (success/fail)
 - `cicd_tests_total` — Test execution counts
-- `cicd_pr_comments_total` — Auto-generated PR summaries
-- `cicd_deployment_gates_total` — Deployment decisions
+
+## High-Performance Execution & Safety
+
+- **Java 21 Virtual Threads**: Non-blocking concurrent execution of independent DAG tasks via `Executors.newVirtualThreadPerTaskExecutor()`.
+- **Topological Cycle Detection**: Kahn's algorithm dynamically validates pipeline task topologies before dispatch, preventing runtime deadlocks.
+- **LLM Code Analysis Agent**: Asynchronous heuristic and LLM-powered security auditing to detect hardcoded credentials, SQL injection, and command injection patterns directly from git diffs.
+- **Automated Dependency Validation**: Real-time gating against SNAPSHOT versions and critical vulnerabilities (e.g. Log4Shell, Spring4Shell, Text4Shell, Jackson deserialization).
 
 ## License
 
