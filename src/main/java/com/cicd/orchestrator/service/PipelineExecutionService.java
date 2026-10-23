@@ -24,6 +24,7 @@ public class PipelineExecutionService {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final PipelineMetricsService metricsService;
     private final PipelineFeedbackProducer feedbackProducer;
+    private final DeploymentGateService deploymentGateService;
     
     // In-memory store for running pipelines (use Redis in production)
     private final Map<String, PipelineState> activePipelines = new ConcurrentHashMap<>();
@@ -33,13 +34,15 @@ public class PipelineExecutionService {
             List<TaskNode> pipelineDag,
             KafkaTemplate<String, String> kafkaTemplate,
             PipelineMetricsService metricsService,
-            PipelineFeedbackProducer feedbackProducer
+            PipelineFeedbackProducer feedbackProducer,
+            DeploymentGateService deploymentGateService
     ) {
         this.dagExecutor = dagExecutor;
         this.pipelineDag = pipelineDag;
         this.kafkaTemplate = kafkaTemplate;
         this.metricsService = metricsService;
         this.feedbackProducer = feedbackProducer;
+        this.deploymentGateService = deploymentGateService;
     }
 
     @Async
@@ -56,6 +59,9 @@ public class PipelineExecutionService {
             Map<String, Object> executionContext = new HashMap<>();
             executionContext.put("repo", initialState.getRepo());
             executionContext.put("commit", initialState.getCommitSha());
+            executionContext.put("environment", initialState.getEnvironment());
+            executionContext.put("prNumber", initialState.getPrNumber());
+            executionContext.put("requiresApproval", initialState.isRequiresApproval());
             
             // Execute the graph concurrently using Virtual Threads
             boolean success = dagExecutor.execute(pipelineDag, executionContext);
@@ -88,6 +94,11 @@ public class PipelineExecutionService {
                 initialState.setPrCommentBody(prComment);
             }
 
+            String deploymentDecision = (String) executionContext.get("deploymentDecision");
+            if (deploymentDecision != null) {
+                initialState.setDeploymentDecision(deploymentDecision);
+            }
+
             metricsService.recordPipelineCompleted(
                     initialState.getRepo(),
                     initialState.getEnvironment(),
@@ -97,7 +108,19 @@ public class PipelineExecutionService {
 
             feedbackProducer.sendPipelineFinished(id, initialState.getRepo(), success, durationMs);
             
-            if (success) {
+            String deploymentStatus = (String) executionContext.get("deploymentStatus");
+            if ("GATING".equalsIgnoreCase(deploymentStatus)) {
+                initialState.status(PipelineState.PipelineStatus.GATING);
+                activePipelines.put(id, initialState);
+                log.info("⏳ Pipeline held in GATING status awaiting human approval: {}", id);
+                kafkaTemplate.send("pipeline-results", id, "GATING");
+            } else if ("BLOCKED".equalsIgnoreCase(deploymentStatus)) {
+                initialState.status(PipelineState.PipelineStatus.BLOCKED);
+                initialState.setCompletedAt(java.time.Instant.now());
+                activePipelines.put(id, initialState);
+                log.warn("🚨 Pipeline BLOCKED by Deployment Gate: {}", id);
+                kafkaTemplate.send("pipeline-results", id, "BLOCKED");
+            } else if (success) {
                 initialState.status(PipelineState.PipelineStatus.COMPLETED);
                 initialState.setCompletedAt(java.time.Instant.now());
                 activePipelines.put(id, initialState);
@@ -173,5 +196,27 @@ public class PipelineExecutionService {
             return true;
         }
         return false;
+    }
+
+    public PipelineState approvePipeline(String pipelineId, String approver, String notes) {
+        PipelineState state = activePipelines.get(pipelineId);
+        if (state == null) {
+            return null;
+        }
+        PipelineState updated = deploymentGateService.approve(state, approver, notes);
+        activePipelines.put(pipelineId, updated);
+        kafkaTemplate.send("pipeline-results", pipelineId, "APPROVED");
+        return updated;
+    }
+
+    public PipelineState rejectPipeline(String pipelineId, String approver, String reason) {
+        PipelineState state = activePipelines.get(pipelineId);
+        if (state == null) {
+            return null;
+        }
+        PipelineState updated = deploymentGateService.reject(state, approver, reason);
+        activePipelines.put(pipelineId, updated);
+        kafkaTemplate.send("pipeline-results", pipelineId, "REJECTED");
+        return updated;
     }
 }

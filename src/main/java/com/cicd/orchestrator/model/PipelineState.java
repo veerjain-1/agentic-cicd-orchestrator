@@ -61,6 +61,18 @@ public class PipelineState {
     @JsonProperty("deploymentDecision")
     private String deploymentDecision;
 
+    @JsonProperty("requiresApproval")
+    private boolean requiresApproval = false;
+
+    @JsonProperty("approver")
+    private String approver;
+
+    @JsonProperty("approvalNotes")
+    private String approvalNotes;
+
+    @JsonProperty("approvedAt")
+    private Instant approvedAt;
+
     // ─── Control Flow ───
     @JsonProperty("retryCount")
     private int retryCount = 0;
@@ -147,6 +159,21 @@ public class PipelineState {
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getCompletedAt() { return completedAt; }
     public Map<String, Long> getNodeTimings() { return nodeTimings; }
+
+    public PipelineState requiresApproval(boolean req) { this.requiresApproval = req; return this; }
+    public PipelineState approver(String app) { this.approver = app; return this; }
+    public PipelineState approvalNotes(String notes) { this.approvalNotes = notes; return this; }
+    public PipelineState approvedAt(Instant at) { this.approvedAt = at; return this; }
+
+    public boolean isRequiresApproval() { return requiresApproval; }
+    public String getApprover() { return approver; }
+    public String getApprovalNotes() { return approvalNotes; }
+    public Instant getApprovedAt() { return approvedAt; }
+
+    public void setRequiresApproval(boolean req) { this.requiresApproval = req; }
+    public void setApprover(String approver) { this.approver = approver; }
+    public void setApprovalNotes(String approvalNotes) { this.approvalNotes = approvalNotes; }
+    public void setApprovedAt(Instant approvedAt) { this.approvedAt = approvedAt; }
 
     // Setters for Jackson
     public void setCommitAnalysis(Map<String, Object> ca) { this.commitAnalysis = ca; }

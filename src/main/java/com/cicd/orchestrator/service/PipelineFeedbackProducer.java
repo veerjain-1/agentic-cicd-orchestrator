@@ -58,6 +58,17 @@ public class PipelineFeedbackProducer {
         }
     }
 
+    public void sendDeploymentGateEvent(String pipelineId, String repo, String gateStatus, String decision) {
+        Map<String, Object> payload = basePayload("DEPLOYMENT_GATE_" + gateStatus.toUpperCase(), pipelineId, repo);
+        payload.put("gateStatus", gateStatus);
+        payload.put("decision", decision);
+        send(TOPIC_PIPELINE_EVENTS, pipelineId, payload);
+
+        if ("AWAITING_APPROVAL".equalsIgnoreCase(decision) || "BLOCKED".equalsIgnoreCase(gateStatus)) {
+            send(TOPIC_FEEDBACK_LOOP, pipelineId, payload);
+        }
+    }
+
     public void sendPipelineFinished(String pipelineId, String repo, boolean success, long durationMs) {
         Map<String, Object> payload = basePayload(success ? "PIPELINE_COMPLETED" : "PIPELINE_FAILED", pipelineId, repo);
         payload.put("durationMs", durationMs);

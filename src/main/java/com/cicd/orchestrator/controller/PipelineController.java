@@ -25,14 +25,24 @@ public class PipelineController {
         String repo = request.getOrDefault("repo", "unknown/repo");
         String branch = request.getOrDefault("branch", "main");
         String commitSha = request.getOrDefault("commitSha", "unknown-sha");
-        
+        String env = request.getOrDefault("environment", "development");
+        boolean requiresApproval = Boolean.parseBoolean(request.getOrDefault("requiresApproval", "false"));
+
         String pipelineId = UUID.randomUUID().toString();
-        
-        PipelineState state = new PipelineState(pipelineId, repo, branch, commitSha);
-        
+
+        PipelineState state = new PipelineState(pipelineId, repo, branch, commitSha)
+                .environment(env)
+                .requiresApproval(requiresApproval);
+
+        if (request.containsKey("prNumber")) {
+            try {
+                state.prNumber(Integer.parseInt(request.get("prNumber")));
+            } catch (NumberFormatException ignored) {}
+        }
+
         // Start asynchronously
         executionService.executePipeline(state);
-        
+
         return ResponseEntity.accepted().body(Map.of(
                 "status", "QUEUED",
                 "pipelineId", pipelineId,
@@ -74,6 +84,44 @@ public class PipelineController {
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.ok(prComment);
+    }
+
+    @PostMapping("/{pipelineId}/approve")
+    public ResponseEntity<?> approvePipeline(
+            @PathVariable String pipelineId,
+            @RequestBody(required = false) Map<String, String> body
+    ) {
+        String approver = body != null ? body.getOrDefault("approver", "engineer") : "engineer";
+        String notes = body != null ? body.getOrDefault("notes", "Approved via API") : "Approved via API";
+
+        try {
+            PipelineState approved = executionService.approvePipeline(pipelineId, approver, notes);
+            if (approved == null) {
+                return ResponseEntity.notFound().build();
+            }
+            return ResponseEntity.ok(approved);
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{pipelineId}/reject")
+    public ResponseEntity<?> rejectPipeline(
+            @PathVariable String pipelineId,
+            @RequestBody(required = false) Map<String, String> body
+    ) {
+        String approver = body != null ? body.getOrDefault("approver", "engineer") : "engineer";
+        String reason = body != null ? body.getOrDefault("reason", "Rejected via API") : "Rejected via API";
+
+        try {
+            PipelineState rejected = executionService.rejectPipeline(pipelineId, approver, reason);
+            if (rejected == null) {
+                return ResponseEntity.notFound().build();
+            }
+            return ResponseEntity.ok(rejected);
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     @DeleteMapping("/{pipelineId}")

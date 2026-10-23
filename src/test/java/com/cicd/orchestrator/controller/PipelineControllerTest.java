@@ -124,4 +124,57 @@ public class PipelineControllerTest {
         mockMvc.perform(get("/api/v1/pipelines/p300/pr-comment"))
                 .andExpect(status().isNoContent());
     }
+
+    @Test
+    public void testApprovePipelineSuccess() throws Exception {
+        PipelineState approvedState = new PipelineState("p400", "repo", "main", "sha");
+        approvedState.status(PipelineState.PipelineStatus.APPROVED);
+        approvedState.approver("veerjain");
+
+        when(executionService.approvePipeline(eq("p400"), eq("veerjain"), eq("LGTM")))
+                .thenReturn(approvedState);
+
+        mockMvc.perform(post("/api/v1/pipelines/p400/approve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"approver\": \"veerjain\", \"notes\": \"LGTM\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.approver").value("veerjain"));
+    }
+
+    @Test
+    public void testApprovePipelineNotFound() throws Exception {
+        when(executionService.approvePipeline(eq("p-missing"), any(), any()))
+                .thenReturn(null);
+
+        mockMvc.perform(post("/api/v1/pipelines/p-missing/approve"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    public void testApprovePipelineThrowsBadRequestWhenNotGating() throws Exception {
+        when(executionService.approvePipeline(eq("p-fail"), any(), any()))
+                .thenThrow(new IllegalStateException("Pipeline is not currently in GATING state"));
+
+        mockMvc.perform(post("/api/v1/pipelines/p-fail/approve"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Pipeline is not currently in GATING state"));
+    }
+
+    @Test
+    public void testRejectPipelineSuccess() throws Exception {
+        PipelineState rejectedState = new PipelineState("p500", "repo", "main", "sha");
+        rejectedState.status(PipelineState.PipelineStatus.BLOCKED);
+        rejectedState.approver("sec-officer");
+
+        when(executionService.rejectPipeline(eq("p500"), eq("sec-officer"), eq("Vulnerabilities detected")))
+                .thenReturn(rejectedState);
+
+        mockMvc.perform(post("/api/v1/pipelines/p500/reject")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"approver\": \"sec-officer\", \"reason\": \"Vulnerabilities detected\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("BLOCKED"))
+                .andExpect(jsonPath("$.approver").value("sec-officer"));
+    }
 }

@@ -79,11 +79,30 @@ docker-compose up -d
 # 3. Trigger a pipeline manually
 curl -X POST http://localhost:8080/api/v1/pipelines/trigger \
   -H "Content-Type: application/json" \
-  -d '{"repo": "org/my-repo", "branch": "feature/new-api", "commitSha": "abc123"}'
+  -d '{"repo": "org/my-repo", "branch": "main", "commitSha": "abc123", "environment": "production"}'
 
-# 4. View Grafana dashboards
+# 4. Approve or reject a Human-in-the-Loop production gate
+curl -X POST http://localhost:8080/api/v1/pipelines/{pipelineId}/approve \
+  -H "Content-Type: application/json" \
+  -d '{"approver": "lead-engineer", "notes": "Security review verified"}'
+
+# 5. View Grafana dashboards
 open http://localhost:3001  # admin/admin
 ```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/pipelines/trigger` | Trigger a new pipeline execution with optional environment and approval flags |
+| `GET` | `/api/v1/pipelines` | List all active and historic pipeline states |
+| `GET` | `/api/v1/pipelines/{id}` | Get status and execution state of a specific pipeline |
+| `GET` | `/api/v1/pipelines/{id}/report` | Retrieve aggregated security audit and dependency evaluation report |
+| `GET` | `/api/v1/pipelines/{id}/pr-comment` | Fetch generated Markdown PR review comment |
+| `POST` | `/api/v1/pipelines/{id}/approve` | **Human-in-the-Loop**: Approve a held deployment gate |
+| `POST` | `/api/v1/pipelines/{id}/reject` | **Human-in-the-Loop**: Reject a held deployment gate |
+| `DELETE` | `/api/v1/pipelines/{id}` | Cancel an active pipeline execution |
+| `POST` | `/api/v1/webhooks/github` | Receive GitHub `push` and `pull_request` webhooks with HMAC-SHA256 signature verification |
 
 ## Observability
 
@@ -106,6 +125,8 @@ open http://localhost:3001  # admin/admin
 - **Topological Cycle Detection**: Kahn's algorithm dynamically validates pipeline task topologies before dispatch, preventing runtime deadlocks.
 - **LLM Code Analysis Agent**: Asynchronous heuristic and LLM-powered security auditing to detect hardcoded credentials, SQL injection, and command injection patterns directly from git diffs.
 - **Automated Dependency Validation**: Real-time gating against SNAPSHOT versions and critical vulnerabilities (e.g. Log4Shell, Spring4Shell, Text4Shell, Jackson deserialization).
+- **Automated PR Review Dispatcher**: Asynchronously posts rich collapsible Markdown code reviews directly to GitHub Pull Requests via WebClient with dry-run fallback.
+- **Human-in-the-Loop (HITL) Deployment Gate**: Policy-driven gates enforcing automatic blocks on critical vulnerabilities, auto-approvals on staging, and cryptographic approval holds for production deployments.
 
 ## License
 

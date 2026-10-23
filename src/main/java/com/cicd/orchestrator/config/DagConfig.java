@@ -2,6 +2,8 @@ package com.cicd.orchestrator.config;
 
 import com.cicd.orchestrator.engine.DagExecutor;
 import com.cicd.orchestrator.engine.TaskNode;
+import com.cicd.orchestrator.service.DeploymentGateService;
+import com.cicd.orchestrator.service.GitHubCommentDispatcherService;
 import com.cicd.orchestrator.service.LLMAnalysisService;
 import com.cicd.orchestrator.tasks.*;
 import org.springframework.context.annotation.Bean;
@@ -23,7 +25,11 @@ public class DagConfig {
      * and recursive LLM code analysis agent inspection.
      */
     @Bean
-    public List<TaskNode> standardPipelineDag(LLMAnalysisService llmAnalysisService) {
+    public List<TaskNode> standardPipelineDag(
+            LLMAnalysisService llmAnalysisService,
+            GitHubCommentDispatcherService commentDispatcherService,
+            DeploymentGateService deploymentGateService
+    ) {
         TaskNode cloneNode = new TaskNode("clone", new CloneRepoTask());
 
         TaskNode validateDepsNode = new TaskNode("validate-dependencies", new DependencyValidationTask())
@@ -39,13 +45,19 @@ public class DagConfig {
         TaskNode testNode = new TaskNode("test", new RunTestsTask())
                 .dependsOn("build");
 
-        TaskNode publishNode = new TaskNode("publish", new PublishArtifactTask())
+        TaskNode prCommentNode = new TaskNode("pr-comment-dispatcher", new PRCommentDispatcherTask(commentDispatcherService))
                 .dependsOn("test")
                 .dependsOn("code-analysis-agent");
 
+        TaskNode gateNode = new TaskNode("deployment-gate", new DeploymentGateTask(deploymentGateService))
+                .dependsOn("pr-comment-dispatcher");
+
+        TaskNode publishNode = new TaskNode("publish", new PublishArtifactTask())
+                .dependsOn("deployment-gate");
+
         // The engine performs topological sorting and executes non-dependent nodes
         // concurrently using Java 21 Virtual Threads.
-        return Arrays.asList(cloneNode, validateDepsNode, codeAnalysisNode, buildNode, testNode, publishNode);
+        return Arrays.asList(cloneNode, validateDepsNode, codeAnalysisNode, buildNode, testNode, prCommentNode, gateNode, publishNode);
     }
 }
 
