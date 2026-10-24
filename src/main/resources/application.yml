@@ -58,3 +58,11 @@ logging:
   level:
     com.cicd.orchestrator: DEBUG
     org.apache.kafka: WARN
+
+# ─── Notifications ───
+notifications:
+  enabled: true
+  slack:
+    webhook-url: ${SLACK_WEBHOOK_URL:}
+  webhook:
+    url: ${NOTIFICATION_WEBHOOK_URL:}
