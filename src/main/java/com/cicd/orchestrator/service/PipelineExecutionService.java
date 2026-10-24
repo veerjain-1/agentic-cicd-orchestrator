@@ -25,6 +25,8 @@ public class PipelineExecutionService {
     private final PipelineMetricsService metricsService;
     private final PipelineFeedbackProducer feedbackProducer;
     private final DeploymentGateService deploymentGateService;
+    private final NotificationService notificationService;
+    private final RollbackService rollbackService;
     
     // In-memory store for running pipelines (use Redis in production)
     private final Map<String, PipelineState> activePipelines = new ConcurrentHashMap<>();
@@ -35,7 +37,9 @@ public class PipelineExecutionService {
             KafkaTemplate<String, String> kafkaTemplate,
             PipelineMetricsService metricsService,
             PipelineFeedbackProducer feedbackProducer,
-            DeploymentGateService deploymentGateService
+            DeploymentGateService deploymentGateService,
+            NotificationService notificationService,
+            RollbackService rollbackService
     ) {
         this.dagExecutor = dagExecutor;
         this.pipelineDag = pipelineDag;
@@ -43,6 +47,8 @@ public class PipelineExecutionService {
         this.metricsService = metricsService;
         this.feedbackProducer = feedbackProducer;
         this.deploymentGateService = deploymentGateService;
+        this.notificationService = notificationService;
+        this.rollbackService = rollbackService;
     }
 
     @Async
@@ -114,24 +120,31 @@ public class PipelineExecutionService {
                 activePipelines.put(id, initialState);
                 log.info("⏳ Pipeline held in GATING status awaiting human approval: {}", id);
                 kafkaTemplate.send("pipeline-results", id, "GATING");
+                notificationService.notifyDeploymentGating(id, initialState.getRepo(), initialState.getEnvironment());
             } else if ("BLOCKED".equalsIgnoreCase(deploymentStatus)) {
                 initialState.status(PipelineState.PipelineStatus.BLOCKED);
                 initialState.setCompletedAt(java.time.Instant.now());
                 activePipelines.put(id, initialState);
                 log.warn("🚨 Pipeline BLOCKED by Deployment Gate: {}", id);
                 kafkaTemplate.send("pipeline-results", id, "BLOCKED");
+                notificationService.notifyPipelineFailure(id, initialState.getRepo(), initialState.getBranch(), initialState.getCommitSha(), initialState.getErrors());
+                evaluateRollback(initialState);
             } else if (success) {
                 initialState.status(PipelineState.PipelineStatus.COMPLETED);
                 initialState.setCompletedAt(java.time.Instant.now());
                 activePipelines.put(id, initialState);
                 log.info("✅ Pipeline completed successfully: {}", id);
                 kafkaTemplate.send("pipeline-results", id, "COMPLETED");
+                notificationService.notifyPipelineSuccess(id, initialState.getRepo(), initialState.getBranch(), durationMs);
+                rollbackService.registerSuccessfulDeployment(initialState.getRepo(), initialState.getEnvironment(), initialState.getCommitSha());
             } else {
                 log.error("❌ Pipeline execution failed for ID: {}", id);
                 initialState.status(PipelineState.PipelineStatus.FAILED);
                 initialState.setCompletedAt(java.time.Instant.now());
                 activePipelines.put(id, initialState);
                 kafkaTemplate.send("pipeline-results", id, "FAILED");
+                notificationService.notifyPipelineFailure(id, initialState.getRepo(), initialState.getBranch(), initialState.getCommitSha(), initialState.getErrors());
+                evaluateRollback(initialState);
             }
             
         } catch (Exception e) {
@@ -152,6 +165,8 @@ public class PipelineExecutionService {
             activePipelines.put(id, initialState);
             
             kafkaTemplate.send("pipeline-results", id, "FAILED");
+            notificationService.notifyPipelineFailure(id, initialState.getRepo(), initialState.getBranch(), initialState.getCommitSha(), initialState.getErrors());
+            evaluateRollback(initialState);
         }
     }
 
@@ -218,5 +233,34 @@ public class PipelineExecutionService {
         activePipelines.put(pipelineId, updated);
         kafkaTemplate.send("pipeline-results", pipelineId, "REJECTED");
         return updated;
+    }
+
+    /**
+     * Evaluate whether automatic rollback should be triggered for a failed pipeline.
+     */
+    private void evaluateRollback(PipelineState state) {
+        if (rollbackService.shouldRollback(state)) {
+            String reason = "Pipeline " + state.getPipelineId() + " failed with status: " + state.getStatus();
+            RollbackService.RollbackRecord record = rollbackService.executeRollback(state, reason);
+            if (record.success) {
+                log.info("⏪ Auto-rollback completed for pipeline [{}]", state.getPipelineId());
+            } else {
+                log.error("❌ Auto-rollback failed for pipeline [{}]: {}", state.getPipelineId(), record.error);
+            }
+        }
+    }
+
+    /**
+     * Get the rollback record for a pipeline.
+     */
+    public RollbackService.RollbackRecord getRollbackRecord(String pipelineId) {
+        return rollbackService.getRollbackRecord(pipelineId);
+    }
+
+    /**
+     * Get the notification service for direct access from controllers.
+     */
+    public NotificationService getNotificationService() {
+        return notificationService;
     }
 }

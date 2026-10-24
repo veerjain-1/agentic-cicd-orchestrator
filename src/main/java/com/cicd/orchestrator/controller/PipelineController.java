@@ -1,7 +1,11 @@
 package com.cicd.orchestrator.controller;
 
+import com.cicd.orchestrator.model.NotificationEvent;
 import com.cicd.orchestrator.model.PipelineState;
+import com.cicd.orchestrator.model.RetryAttempt;
 import com.cicd.orchestrator.service.PipelineExecutionService;
+import com.cicd.orchestrator.service.RetryExecutorService;
+import com.cicd.orchestrator.service.RollbackService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,9 +19,12 @@ import java.util.UUID;
 public class PipelineController {
 
     private final PipelineExecutionService executionService;
+    private final RetryExecutorService retryExecutorService;
 
-    public PipelineController(PipelineExecutionService executionService) {
+    public PipelineController(PipelineExecutionService executionService,
+                              RetryExecutorService retryExecutorService) {
         this.executionService = executionService;
+        this.retryExecutorService = retryExecutorService;
     }
 
     @PostMapping("/trigger")
@@ -135,5 +142,41 @@ public class PipelineController {
                 "pipelineId", pipelineId,
                 "message", "Pipeline cancelled successfully."
         ));
+    }
+
+    // ─── Notification Endpoints ───
+
+    @GetMapping("/notifications")
+    public ResponseEntity<List<NotificationEvent>> getNotifications() {
+        return ResponseEntity.ok(executionService.getNotificationService().getRecentNotifications());
+    }
+
+    // ─── Rollback Endpoints ───
+
+    @GetMapping("/{pipelineId}/rollback")
+    public ResponseEntity<?> getRollbackRecord(@PathVariable String pipelineId) {
+        RollbackService.RollbackRecord record = executionService.getRollbackRecord(pipelineId);
+        if (record == null) {
+            return ResponseEntity.ok(Map.of(
+                    "pipelineId", pipelineId,
+                    "rollback", "none",
+                    "message", "No rollback triggered for this pipeline."
+            ));
+        }
+        return ResponseEntity.ok(record.toMap());
+    }
+
+    // ─── Retry History Endpoints ───
+
+    @GetMapping("/{pipelineId}/retries")
+    public ResponseEntity<List<RetryAttempt>> getRetryHistory(@PathVariable String pipelineId) {
+        return ResponseEntity.ok(retryExecutorService.getRetryHistory(pipelineId));
+    }
+
+    @GetMapping("/{pipelineId}/retries/{taskId}")
+    public ResponseEntity<List<RetryAttempt>> getTaskRetryHistory(
+            @PathVariable String pipelineId,
+            @PathVariable String taskId) {
+        return ResponseEntity.ok(retryExecutorService.getTaskRetryHistory(pipelineId, taskId));
     }
 }

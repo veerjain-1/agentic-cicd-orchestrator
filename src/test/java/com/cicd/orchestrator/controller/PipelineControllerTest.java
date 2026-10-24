@@ -2,6 +2,7 @@ package com.cicd.orchestrator.controller;
 
 import com.cicd.orchestrator.model.PipelineState;
 import com.cicd.orchestrator.service.PipelineExecutionService;
+import com.cicd.orchestrator.service.RetryExecutorService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -22,6 +23,9 @@ public class PipelineControllerTest {
 
     @MockBean
     private PipelineExecutionService executionService;
+
+    @MockBean
+    private RetryExecutorService retryExecutorService;
 
     @Test
     public void testTriggerPipelineReturnsAccepted() throws Exception {
@@ -176,5 +180,24 @@ public class PipelineControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("BLOCKED"))
                 .andExpect(jsonPath("$.approver").value("sec-officer"));
+    }
+
+    @Test
+    public void testGetRollbackRecordNone() throws Exception {
+        when(executionService.getRollbackRecord("pipe-none")).thenReturn(null);
+
+        mockMvc.perform(get("/api/v1/pipelines/pipe-none/rollback"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rollback").value("none"))
+                .andExpect(jsonPath("$.pipelineId").value("pipe-none"));
+    }
+
+    @Test
+    public void testGetRetryHistory() throws Exception {
+        when(retryExecutorService.getRetryHistory("pipe-retries")).thenReturn(java.util.List.of());
+
+        mockMvc.perform(get("/api/v1/pipelines/pipe-retries/retries"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
     }
 }
