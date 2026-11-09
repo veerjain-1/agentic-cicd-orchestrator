@@ -125,14 +125,48 @@ public class DagExecutor {
     }
 
     private void validateDag(List<TaskNode> nodes, Map<String, TaskNode> nodeMap) {
-        // Simple cycle and missing dependency check
+        Map<String, Integer> inDegree = new HashMap<>();
+        Map<String, List<String>> dependents = new HashMap<>();
+
+        for (TaskNode node : nodes) {
+            inDegree.putIfAbsent(node.getId(), 0);
+            dependents.putIfAbsent(node.getId(), new ArrayList<>());
+        }
+
         for (TaskNode node : nodes) {
             for (String dep : node.getDependencies()) {
                 if (!nodeMap.containsKey(dep)) {
                     throw new IllegalArgumentException("Missing dependency: " + dep + " for node: " + node.getId());
                 }
+                // dep must complete before node can run: dep -> node
+                dependents.get(dep).add(node.getId());
+                inDegree.put(node.getId(), inDegree.get(node.getId()) + 1);
             }
         }
-        // TODO: Full Tarjan's or Kahn's algorithm for cycle detection
+
+        Queue<String> readyQueue = new LinkedList<>();
+        for (Map.Entry<String, Integer> entry : inDegree.entrySet()) {
+            if (entry.getValue() == 0) {
+                readyQueue.add(entry.getKey());
+            }
+        }
+
+        int visitedCount = 0;
+        while (!readyQueue.isEmpty()) {
+            String current = readyQueue.poll();
+            visitedCount++;
+
+            for (String dependentId : dependents.getOrDefault(current, Collections.emptyList())) {
+                int newInDegree = inDegree.get(dependentId) - 1;
+                inDegree.put(dependentId, newInDegree);
+                if (newInDegree == 0) {
+                    readyQueue.add(dependentId);
+                }
+            }
+        }
+
+        if (visitedCount != nodes.size()) {
+            throw new IllegalArgumentException("Cycle detected in DAG topology. Visited " + visitedCount + " of " + nodes.size() + " nodes.");
+        }
     }
 }
